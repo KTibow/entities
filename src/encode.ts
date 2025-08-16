@@ -1,4 +1,4 @@
-import { htmlTrie } from "./generated/encode-html.js";
+import { map } from "./generated/encode-html.js";
 import { xmlReplacer, getCodePoint } from "./escape.js";
 
 const htmlReplacer = /[\t\n\f!-,./:-@[-`{-}\u0080-\uFFFF]/g;
@@ -30,48 +30,38 @@ export function encodeNonAsciiHTML(input: string): string {
 }
 
 function encodeHTMLTrieRe(regExp: RegExp, input: string): string {
-    let returnValue = "";
-    let lastIndex = 0;
-    let match;
+    let skipIndex = -1;
 
-    while ((match = regExp.exec(input)) !== null) {
-        const { index } = match;
-        returnValue += input.substring(lastIndex, index);
-        const char = input.charCodeAt(index);
-        let next = htmlTrie.get(char);
+    return input.replace(
+        regExp,
+        (character: string, index: number, string: string): string => {
+            // If we already consumed this index as the second part of a previous replacement, skip it.
+            if (index === skipIndex) {
+                skipIndex = -1;
+                return "";
+            }
 
-        if (typeof next === "object") {
-            // We are in a branch. Try to match the next char.
-            if (index + 1 < input.length) {
-                const nextChar = input.charCodeAt(index + 1);
-                const value =
-                    typeof next.n === "number"
-                        ? next.n === nextChar
-                            ? next.o
-                            : undefined
-                        : next.n.get(nextChar);
-
-                if (value !== undefined) {
-                    returnValue += value;
-                    lastIndex = regExp.lastIndex += 1;
-                    continue;
+            // Try two-character mapping first (covers surrogate pairs or other mapped sequences).
+            if (index + 1 < string.length) {
+                const nextChar = string.charAt(index + 1);
+                const pairKey = character + nextChar;
+                if (pairKey in map) {
+                    skipIndex = index + 1; // We consumed a surrogate pair, skip next.
+                    return `&${map[pairKey]};`;
                 }
             }
 
-            next = next.v;
-        }
+            // Then try single-character mapping.
+            if (character in map) {
+                return `&${map[character]};`;
+            }
 
-        // We might have a tree node without a value; skip and use a numeric entity.
-        if (next === undefined) {
-            const cp = getCodePoint(input, index);
-            returnValue += `&#x${cp.toString(16)};`;
-            // Increase by 1 if we have a surrogate pair
-            lastIndex = regExp.lastIndex += Number(cp !== char);
-        } else {
-            returnValue += next;
-            lastIndex = index + 1;
-        }
-    }
-
-    return returnValue + input.substr(lastIndex);
+            // Fallback: Use numeric hexadecimal reference. Handle surrogate pairs via getCodePoint.
+            const cp = getCodePoint(string, index);
+            if (cp !== character.charCodeAt(0)) {
+                skipIndex = index + 1; // We consumed a surrogate pair, skip next.
+            }
+            return `&#x${cp.toString(16)};`;
+        },
+    );
 }
