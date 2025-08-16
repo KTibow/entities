@@ -3,9 +3,20 @@ import { writeFileSync } from "node:fs";
 
 const encodings: Record<string, string> = {};
 for (const [encoding, character] of Object.entries(htmlMap)) {
-    if (!encodings[character] || encoding === encoding.toLowerCase()) {
-        encodings[character] = encoding;
+    // Never prefer longer encodings
+    if (encodings[character] && encoding.length > encodings[character].length) {
+        continue;
     }
+    // Never prefer encodings of the same length that aren't lowercase
+    if (
+        encodings[character] &&
+        encoding.length === encodings[character].length &&
+        encoding !== encoding.toLowerCase()
+    ) {
+        continue;
+    }
+
+    encodings[character] = encoding;
 }
 
 const shortCharacters: string[] = [];
